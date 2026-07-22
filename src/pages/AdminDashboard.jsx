@@ -71,13 +71,16 @@ export default function AdminDashboard() {
         if (cached.age < 60) return;
       }
 
+      const API_BASE = import.meta.env.VITE_BACKEND_URL || 'https://black-white-backend.onrender.com';
+      const getUrl = (path) => path.startsWith('http') ? path : `${API_BASE}${path}`;
+
       const [resP, resC, resS, resH, resO, resCoupons] = await Promise.all([
-        fetch('/api/products', { headers, cache: 'no-store' }).then(r => r.json()),
-        fetch('/api/categories', { headers, cache: 'no-store' }).then(r => r.json()),
-        fetch('/api/settings', { headers, cache: 'no-store' }).then(r => r.json()),
-        fetch('/api/hero', { headers, cache: 'no-store' }).then(r => r.json()),
-        fetch('/api/overlay', { headers, cache: 'no-store' }).then(r => r.json()),
-        fetch('/api/coupons', { headers, cache: 'no-store' }).then(r => r.json())
+        fetch(getUrl('/api/products'), { headers, cache: 'no-store' }).then(r => r.json()),
+        fetch(getUrl('/api/categories'), { headers, cache: 'no-store' }).then(r => r.json()),
+        fetch(getUrl('/api/settings'), { headers, cache: 'no-store' }).then(r => r.json()),
+        fetch(getUrl('/api/hero'), { headers, cache: 'no-store' }).then(r => r.json()),
+        fetch(getUrl('/api/overlay'), { headers, cache: 'no-store' }).then(r => r.json()),
+        fetch(getUrl('/api/coupons'), { headers, cache: 'no-store' }).then(r => r.json())
       ]);
       
       clientCache.set('admin_dashboard', { resP, resC, resS, resH, resO, resCoupons }, 60);
