@@ -8,7 +8,7 @@ export default defineConfig({
     port: 5174,
     proxy: {
       '/api': {
-        target: 'https://black-white-backend.onrender.com',
+        target: 'http://localhost:5001',
         changeOrigin: true,
         secure: false
       }

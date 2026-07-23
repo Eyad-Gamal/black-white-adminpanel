@@ -36,6 +36,7 @@ export default function AdminDashboard() {
   const [editingCoupon, setEditingCoupon] = useState(null);
 
   const [uploading, setUploading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [draggedProductIdx, setDraggedProductIdx] = useState(null);
 
   useEffect(() => {
@@ -84,10 +85,7 @@ export default function AdminDashboard() {
         }
       }
 
-      const API_BASE = import.meta.env.VITE_BACKEND_URL || 'https://black-white-backend.onrender.com';
-      const getUrl = (path) => path.startsWith('http') ? path : `${API_BASE}${path}`;
-
-      // Fetch each endpoint independently so one failure doesn't block others
+      // Use relative URLs — goes through Vite proxy to localhost:5001
       const safeFetch = async (url) => {
         try {
           const r = await fetch(url, { headers, cache: 'no-store' });
@@ -99,12 +97,12 @@ export default function AdminDashboard() {
       };
 
       const [resP, resC, resS, resH, resO, resCoupons] = await Promise.all([
-        safeFetch(getUrl('/api/products')),
-        safeFetch(getUrl('/api/categories')),
-        safeFetch(getUrl('/api/settings')),
-        safeFetch(getUrl('/api/hero')),
-        safeFetch(getUrl('/api/overlay')),
-        safeFetch(getUrl('/api/coupons'))
+        safeFetch('/api/products'),
+        safeFetch('/api/categories'),
+        safeFetch('/api/settings'),
+        safeFetch('/api/hero'),
+        safeFetch('/api/overlay'),
+        safeFetch('/api/coupons')
       ]);
       
       clientCache.set('admin_dashboard', { resP, resC, resS, resH, resO, resCoupons }, 60);
@@ -171,34 +169,28 @@ export default function AdminDashboard() {
   const handleImageUpload = async (files) => {
     setUploading(true);
     const uploadedUrls = [];
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const compressedBase64 = await compressImage(file);
-      const url = await new Promise((resolve) => {
-          try {
-            fetch('/api/upload', {
-              method: 'POST',
-              headers: getAdminHeaders(),
-              body: JSON.stringify({ image: compressedBase64 })
-            }).then(async res => {
-              if (!res.ok) {
-                  console.error("Upload failed with status", res.status);
-                  resolve(compressedBase64);
-                  return;
-              }
-              const data = await res.json();
-              resolve(data.url);
-            }).catch(error => {
-              console.error("Upload failed", error);
-              resolve(compressedBase64); // Fallback to base64
-            });
-          } catch (error) {
-            resolve(compressedBase64);
-          }
-      });
-      if (url) uploadedUrls.push(url);
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const compressedBase64 = await compressImage(file);
+        const res = await fetch('/api/upload', {
+          method: 'POST',
+          headers: getAdminHeaders(),
+          body: JSON.stringify({ image: compressedBase64 })
+        });
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`رفع الصورة فشل (${res.status}): ${errText.slice(0, 100)}`);
+        }
+        const text = await res.text();
+        let data;
+        try { data = JSON.parse(text); } catch { throw new Error('رد غير صالح من سيرفر الرفع'); }
+        if (!data.url) throw new Error('لم يتم الحصول على رابط الصورة من Cloudinary');
+        uploadedUrls.push(data.url);
+      }
+    } finally {
+      setUploading(false);
     }
-    setUploading(false);
     return uploadedUrls;
   };
 
@@ -248,65 +240,87 @@ export default function AdminDashboard() {
   // --- CRUD Functions ---
   const saveProduct = async (e) => {
     e.preventDefault();
-    const formData = new FormData(e.target);
-    const productData = {
-      title: { ar: formData.get('title_ar'), en: formData.get('title_en') },
-      categoryId: formData.get('categoryId'),
-      tag: formData.get('tag'),
-      stock: Number(formData.get('stock')) || 0,
-      order: Number(formData.get('order')) || 0,
-      prices: {}
-    };
-    const sizes = formData.getAll('size_name');
-    const prices = formData.getAll('size_price');
-    sizes.forEach((s, i) => { if (s && prices[i]) productData.prices[s] = Number(prices[i]); });
-    
-    const fileInput = e.target.querySelector('input[type="file"]');
-    if (fileInput?.files?.length > 0) {
-      // New images uploaded — use them
-      const filesToUpload = Array.from(fileInput.files).slice(0, 4);
-      const urls = await handleImageUpload(filesToUpload);
-      if (urls.length > 0) {
-        productData.images = urls;
-        productData.mainImage = urls[0];
+    if (isSaving || uploading) return;
+    setIsSaving(true);
+    try {
+      const formData = new FormData(e.target);
+      const productData = {
+        title: { ar: formData.get('title_ar'), en: formData.get('title_en') },
+        categoryId: formData.get('categoryId'),
+        tag: formData.get('tag'),
+        stock: Number(formData.get('stock')) || 0,
+        order: Number(formData.get('order')) || 0,
+        prices: {}
+      };
+      const sizes = formData.getAll('size_name');
+      const prices = formData.getAll('size_price');
+      sizes.forEach((s, i) => { if (s && prices[i]) productData.prices[s] = Number(prices[i]); });
+      
+      const fileInput = e.target.querySelector('input[type="file"]');
+      if (fileInput?.files?.length > 0) {
+        const filesToUpload = Array.from(fileInput.files).slice(0, 4);
+        const urls = await handleImageUpload(filesToUpload);
+        if (urls.length > 0) {
+          productData.images = urls;
+          productData.mainImage = urls[0];
+        }
+      } else if (editingProduct) {
+        productData.images = editingProduct.images || editingProduct.image || [];
+        productData.mainImage = editingProduct.mainImage || productData.images[0] || '';
       }
-    } else if (editingProduct) {
-      // No new images — preserve existing ones
-      productData.images = editingProduct.images || editingProduct.image || [];
-      productData.mainImage = editingProduct.mainImage || productData.images[0] || '';
-    }
 
-    // Determine if editing or creating
-    const isEditing = !!editingProduct;
-    
-    if (isEditing) {
-      // Use custom 'id' field for URL, fall back to _id
-      const productId = editingProduct.id || editingProduct._id;
-      productData.id = editingProduct.id || Date.now().toString();
-      const updateUrl = `/api/products/${productId}`;
-      const res = await fetch(updateUrl, { method: 'PUT', headers: getAdminHeaders(), body: JSON.stringify(productData) });
-      const result = await safeJson(res, {});
-      if (result && result.success === false) {
-        console.error('Update failed:', result);
-        alert('فشل التعديل: ' + (result.message || 'خطأ غير معروف'));
-        return;
+      const isEditing = !!editingProduct;
+      
+      if (isEditing) {
+        const productId = editingProduct.id || editingProduct._id;
+        productData.id = editingProduct.id || Date.now().toString();
+        const res = await fetch(`/api/products/${productId}`, {
+          method: 'PUT',
+          headers: getAdminHeaders(),
+          body: JSON.stringify(productData)
+        });
+        if (!res.ok) {
+          const errText = await res.text();
+          console.error('PUT failed:', res.status, errText);
+          alert(`فشل التعديل (كود ${res.status}): تأكد من تشغيل الباكند محلياً`);
+          return;
+        }
+        const result = await safeJson(res, {});
+        if (result && result.success === false) {
+          alert('فشل التعديل: ' + (result.message || 'خطأ غير معروف'));
+          return;
+        }
+      } else {
+        productData.id = Date.now().toString();
+        const res = await fetch('/api/products', {
+          method: 'POST',
+          headers: getAdminHeaders(),
+          body: JSON.stringify(productData)
+        });
+        if (!res.ok) {
+          const errText = await res.text();
+          console.error('POST failed:', res.status, errText);
+          alert(`فشل الإضافة (كود ${res.status}): تأكد من تشغيل الباكند محلياً`);
+          return;
+        }
+        const result = await safeJson(res, {});
+        if (result && result.success === false) {
+          alert('فشل الإضافة: ' + (result.message || 'خطأ غير معروف'));
+          return;
+        }
       }
-    } else {
-      // New product
-      productData.id = Date.now().toString();
-      const res = await fetch('/api/products', { method: 'POST', headers: getAdminHeaders(), body: JSON.stringify(productData) });
-      const result = await safeJson(res, {});
-      if (result && result.success === false) {
-        console.error('Create failed:', result);
-        alert('فشل الإضافة: ' + (result.message || 'خطأ غير معروف'));
-        return;
-      }
+      
+      alert('✅ تم الحفظ بنجاح!');
+      setIsProductModalOpen(false);
+      setEditingProduct(null);
+      clientCache.clearAll();
+      fetchData(true);
+    } catch (err) {
+      console.error('saveProduct exception:', err);
+      alert('خطأ غير متوقع: ' + err.message + '\nتأكد من تشغيل الباكند على منفذ 5001');
+    } finally {
+      setIsSaving(false);
     }
-    
-    setIsProductModalOpen(false);
-    setEditingProduct(null);
-    clientCache.clearAll();
-    fetchData(true);
   };
 
   const deleteProduct = async (id) => {
@@ -861,7 +875,9 @@ export default function AdminDashboard() {
                 </div>
               </div>
               <div className="admin-modal-footer">
-                <button type="submit" className="btn btn-primary" disabled={uploading}>{uploading ? 'جاري الرفع...' : 'حفظ المنتج'}</button>
+                <button type="submit" className="btn btn-primary" disabled={uploading || isSaving}>
+                  {isSaving ? 'جاري الحفظ...' : uploading ? 'جاري الرفع...' : 'حفظ المنتج'}
+                </button>
                 <button type="button" className="btn btn-outline" onClick={() => setIsProductModalOpen(false)}>إلغاء</button>
               </div>
             </form>
