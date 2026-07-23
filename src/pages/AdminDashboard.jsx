@@ -52,6 +52,17 @@ export default function AdminDashboard() {
     'admin-password': password || localStorage.getItem('bw_admin_password') || '909035'
   });
 
+  // Safe JSON parser — never throws on empty/non-JSON responses
+  const safeJson = async (res, fallback = null) => {
+    try {
+      const text = await res.text();
+      if (!text || text.trim() === '') return fallback;
+      return JSON.parse(text);
+    } catch {
+      return fallback;
+    }
+  };
+
   async function fetchData(forceRefresh = false) {
     try {
       const headers = { 'admin-password': password || localStorage.getItem('bw_admin_password') || '909035' };
@@ -76,13 +87,24 @@ export default function AdminDashboard() {
       const API_BASE = import.meta.env.VITE_BACKEND_URL || 'https://black-white-backend.onrender.com';
       const getUrl = (path) => path.startsWith('http') ? path : `${API_BASE}${path}`;
 
+      // Fetch each endpoint independently so one failure doesn't block others
+      const safeFetch = async (url) => {
+        try {
+          const r = await fetch(url, { headers, cache: 'no-store' });
+          return await safeJson(r, null);
+        } catch (err) {
+          console.warn('Fetch failed for', url, err.message);
+          return null;
+        }
+      };
+
       const [resP, resC, resS, resH, resO, resCoupons] = await Promise.all([
-        fetch(getUrl('/api/products'), { headers, cache: 'no-store' }).then(r => r.json()),
-        fetch(getUrl('/api/categories'), { headers, cache: 'no-store' }).then(r => r.json()),
-        fetch(getUrl('/api/settings'), { headers, cache: 'no-store' }).then(r => r.json()),
-        fetch(getUrl('/api/hero'), { headers, cache: 'no-store' }).then(r => r.json()),
-        fetch(getUrl('/api/overlay'), { headers, cache: 'no-store' }).then(r => r.json()),
-        fetch(getUrl('/api/coupons'), { headers, cache: 'no-store' }).then(r => r.json())
+        safeFetch(getUrl('/api/products')),
+        safeFetch(getUrl('/api/categories')),
+        safeFetch(getUrl('/api/settings')),
+        safeFetch(getUrl('/api/hero')),
+        safeFetch(getUrl('/api/overlay')),
+        safeFetch(getUrl('/api/coupons'))
       ]);
       
       clientCache.set('admin_dashboard', { resP, resC, resS, resH, resO, resCoupons }, 60);
@@ -97,7 +119,7 @@ export default function AdminDashboard() {
       if (resO && typeof resO === 'object') setOverlay(resO);
       if (Array.isArray(resCoupons)) setCoupons(resCoupons);
     } catch (e) {
-      console.error("API Error:", e);
+      console.error('fetchData Error:', e);
     }
   }
 
@@ -263,8 +285,8 @@ export default function AdminDashboard() {
       productData.id = editingProduct.id || Date.now().toString();
       const updateUrl = `/api/products/${productId}`;
       const res = await fetch(updateUrl, { method: 'PUT', headers: getAdminHeaders(), body: JSON.stringify(productData) });
-      const result = await res.json();
-      if (!result.success) {
+      const result = await safeJson(res, {});
+      if (result && result.success === false) {
         console.error('Update failed:', result);
         alert('فشل التعديل: ' + (result.message || 'خطأ غير معروف'));
         return;
@@ -273,8 +295,8 @@ export default function AdminDashboard() {
       // New product
       productData.id = Date.now().toString();
       const res = await fetch('/api/products', { method: 'POST', headers: getAdminHeaders(), body: JSON.stringify(productData) });
-      const result = await res.json();
-      if (!result.success) {
+      const result = await safeJson(res, {});
+      if (result && result.success === false) {
         console.error('Create failed:', result);
         alert('فشل الإضافة: ' + (result.message || 'خطأ غير معروف'));
         return;
@@ -284,19 +306,19 @@ export default function AdminDashboard() {
     setIsProductModalOpen(false);
     setEditingProduct(null);
     clientCache.clearAll();
-    fetchData(true); // Force refresh from server
+    fetchData(true);
   };
 
   const deleteProduct = async (id) => {
     if(window.confirm('هل أنت متأكد من الحذف؟')) {
       const res = await fetch(`/api/products/${id}`, { method: 'DELETE', headers: getAdminHeaders() });
-      const result = await res.json();
-      if (!result.success) {
+      const result = await safeJson(res, {});
+      if (result && result.success === false) {
         alert('فشل الحذف: ' + (result.message || 'خطأ غير معروف'));
         return;
       }
       clientCache.clearAll();
-      fetchData(true); // Force refresh
+      fetchData(true);
     }
   };
 
