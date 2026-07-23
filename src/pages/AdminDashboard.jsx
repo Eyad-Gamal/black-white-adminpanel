@@ -53,6 +53,15 @@ export default function AdminDashboard() {
     'admin-password': password || localStorage.getItem('bw_admin_password') || '909035'
   });
 
+  const getUrl = (path) => {
+    if (path.startsWith('http')) return path;
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      return `http://localhost:5001${path}`;
+    }
+    const API_BASE = import.meta.env.VITE_BACKEND_URL || 'https://black-white-backend.onrender.com';
+    return `${API_BASE}${path}`;
+  };
+
   // Safe JSON parser — never throws on empty/non-JSON responses
   const safeJson = async (res, fallback = null) => {
     try {
@@ -85,13 +94,12 @@ export default function AdminDashboard() {
         }
       }
 
-      // Use relative URLs — goes through Vite proxy to localhost:5001
-      const safeFetch = async (url) => {
+      const safeFetch = async (path) => {
         try {
-          const r = await fetch(url, { headers, cache: 'no-store' });
+          const r = await fetch(getUrl(path), { headers, cache: 'no-store' });
           return await safeJson(r, null);
         } catch (err) {
-          console.warn('Fetch failed for', url, err.message);
+          console.warn('Fetch failed for', path, err.message);
           return null;
         }
       };
@@ -176,7 +184,7 @@ export default function AdminDashboard() {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         const compressedBase64 = await compressImage(file);
-        const res = await fetch('/api/upload', {
+        const res = await fetch(getUrl('/api/upload'), {
           method: 'POST',
           headers: getAdminHeaders(),
           body: JSON.stringify({ image: compressedBase64 })
@@ -228,7 +236,7 @@ export default function AdminDashboard() {
     
     try {
       await Promise.all(updatedProducts.map((p) => {
-        return fetch(`/api/products/${p.id}`, {
+        return fetch(getUrl(`/api/products/${p.id}`), {
           method: 'PUT',
           headers: getAdminHeaders(),
           body: JSON.stringify({ order: p.order })
@@ -277,7 +285,7 @@ export default function AdminDashboard() {
       if (isEditing) {
         const productId = editingProduct.id || editingProduct._id;
         productData.id = editingProduct.id || Date.now().toString();
-        const res = await fetch(`/api/products/${productId}`, {
+        const res = await fetch(getUrl(`/api/products/${productId}`), {
           method: 'PUT',
           headers: getAdminHeaders(),
           body: JSON.stringify(productData)
@@ -297,7 +305,7 @@ export default function AdminDashboard() {
         }
       } else {
         productData.id = Date.now().toString();
-        const res = await fetch('/api/products', {
+        const res = await fetch(getUrl('/api/products'), {
           method: 'POST',
           headers: getAdminHeaders(),
           body: JSON.stringify(productData)
@@ -331,7 +339,7 @@ export default function AdminDashboard() {
 
   const deleteProduct = async (id) => {
     if(window.confirm('هل أنت متأكد من الحذف؟')) {
-      const res = await fetch(`/api/products/${id}`, { method: 'DELETE', headers: getAdminHeaders() });
+      const res = await fetch(getUrl(`/api/products/${id}`), { method: 'DELETE', headers: getAdminHeaders() });
       const result = await safeJson(res, {});
       if (result && result.success === false) {
         alert('فشل الحذف: ' + (result.message || 'خطأ غير معروف'));
@@ -350,10 +358,10 @@ export default function AdminDashboard() {
     if (isEditing) {
       const catId = editingCategory.id || editingCategory._id;
       catData.id = editingCategory.id || Date.now().toString();
-      await fetch(`/api/categories/${catId}`, { method: 'PUT', headers: getAdminHeaders(), body: JSON.stringify(catData) });
+      await fetch(getUrl(`/api/categories/${catId}`), { method: 'PUT', headers: getAdminHeaders(), body: JSON.stringify(catData) });
     } else {
       catData.id = Date.now().toString();
-      await fetch('/api/categories', { method: 'POST', headers: getAdminHeaders(), body: JSON.stringify(catData) });
+      await fetch(getUrl('/api/categories'), { method: 'POST', headers: getAdminHeaders(), body: JSON.stringify(catData) });
     }
     setIsCategoryModalOpen(false);
     setEditingCategory(null);
@@ -363,7 +371,7 @@ export default function AdminDashboard() {
 
   const deleteCategory = async (id) => {
     if(window.confirm('هل أنت متأكد من الحذف؟')) {
-      await fetch(`/api/categories/${id}`, { method: 'DELETE', headers: getAdminHeaders() });
+      await fetch(getUrl(`/api/categories/${id}`), { method: 'DELETE', headers: getAdminHeaders() });
       clientCache.clearAll();
       fetchData(true);
     }
@@ -382,10 +390,10 @@ export default function AdminDashboard() {
     if (isEditing) {
       const couponId = editingCoupon.id || editingCoupon._id;
       couponData.id = editingCoupon.id || Date.now().toString();
-      await fetch(`/api/coupons/${couponId}`, { method: 'PUT', headers: getAdminHeaders(), body: JSON.stringify(couponData) });
+      await fetch(getUrl(`/api/coupons/${couponId}`), { method: 'PUT', headers: getAdminHeaders(), body: JSON.stringify(couponData) });
     } else {
       couponData.id = Date.now().toString();
-      await fetch('/api/coupons', { method: 'POST', headers: getAdminHeaders(), body: JSON.stringify(couponData) });
+      await fetch(getUrl('/api/coupons'), { method: 'POST', headers: getAdminHeaders(), body: JSON.stringify(couponData) });
     }
     setIsCouponModalOpen(false);
     setEditingCoupon(null);
@@ -395,7 +403,7 @@ export default function AdminDashboard() {
 
   const deleteCoupon = async (id) => {
     if(window.confirm('هل أنت متأكد من الحذف؟')) {
-      await fetch(`/api/coupons/${id}`, { method: 'DELETE', headers: getAdminHeaders() });
+      await fetch(getUrl(`/api/coupons/${id}`), { method: 'DELETE', headers: getAdminHeaders() });
       clientCache.clearAll();
       fetchData(true);
     }
@@ -420,7 +428,7 @@ export default function AdminDashboard() {
       const urls = await handleImageUpload(fileInput.files);
       if(urls && urls.length > 0) heroData.image = urls[0];
     }
-    await fetch('/api/hero', { method: 'PUT', headers: getAdminHeaders(), body: JSON.stringify(heroData) });
+    await fetch(getUrl('/api/hero'), { method: 'PUT', headers: getAdminHeaders(), body: JSON.stringify(heroData) });
     alert('تم الحفظ بنجاح');
     clientCache.clearAll();
     fetchData(true);
@@ -430,7 +438,7 @@ export default function AdminDashboard() {
     e.preventDefault();
     const formData = new FormData(e.target);
     const overlayData = { color: formData.get('color'), opacity: Number(formData.get('opacity')), type: formData.get('type') };
-    await fetch('/api/overlay', { method: 'PUT', headers: getAdminHeaders(), body: JSON.stringify(overlayData) });
+    await fetch(getUrl('/api/overlay'), { method: 'PUT', headers: getAdminHeaders(), body: JSON.stringify(overlayData) });
     alert('تم الحفظ بنجاح');
     clientCache.clearAll();
     fetchData(true);
@@ -446,7 +454,7 @@ export default function AdminDashboard() {
       tiktokUrl: formData.get('tiktokUrl'),
       announcements: announcements
     };
-    await fetch('/api/settings', { method: 'PUT', headers: getAdminHeaders(), body: JSON.stringify(settingsData) });
+    await fetch(getUrl('/api/settings'), { method: 'PUT', headers: getAdminHeaders(), body: JSON.stringify(settingsData) });
     alert('تم الحفظ بنجاح');
     clientCache.clearAll();
     fetchData(true);
