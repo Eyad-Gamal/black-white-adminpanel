@@ -41,8 +41,8 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     if (isLoggedIn) {
-      fetchData();
-      const handleFocus = () => fetchData();
+      fetchData(true);
+      const handleFocus = () => fetchData(); // non-force: uses cache if fresh
       window.addEventListener('focus', handleFocus);
       return () => window.removeEventListener('focus', handleFocus);
     }
@@ -105,16 +105,19 @@ export default function AdminDashboard() {
         safeFetch('/api/coupons')
       ]);
       
-      clientCache.set('admin_dashboard', { resP, resC, resS, resH, resO, resCoupons }, 60);
-      
-      if (Array.isArray(resP)) setProducts(resP);
+      // Only update state for successfully fetched data (not null = failed fetch)
+      if (Array.isArray(resP)) {
+        setProducts(resP);
+        // Only cache if products fetched successfully
+        clientCache.set('admin_dashboard', { resP, resC, resS, resH, resO, resCoupons }, 60);
+      }
       if (Array.isArray(resC)) setCategories(resC);
-      if (resS && typeof resS === 'object') {
+      if (resS && typeof resS === 'object' && !Array.isArray(resS)) {
         setSettings(resS);
         setAnnouncements((resS.announcements && resS.announcements.length > 0) ? resS.announcements : defaultAnnouncements);
       }
-      if (resH && typeof resH === 'object') setHero(resH);
-      if (resO && typeof resO === 'object') setOverlay(resO);
+      if (resH && typeof resH === 'object' && !Array.isArray(resH)) setHero(resH);
+      if (resO && typeof resO === 'object' && !Array.isArray(resO)) setOverlay(resO);
       if (Array.isArray(resCoupons)) setCoupons(resCoupons);
     } catch (e) {
       console.error('fetchData Error:', e);
@@ -279,14 +282,16 @@ export default function AdminDashboard() {
           headers: getAdminHeaders(),
           body: JSON.stringify(productData)
         });
+        // Read body once
+        const resText = await res.text();
         if (!res.ok) {
-          const errText = await res.text();
-          console.error('PUT failed:', res.status, errText);
-          alert(`فشل التعديل (كود ${res.status}): تأكد من تشغيل الباكند محلياً`);
+          console.error('PUT failed:', res.status, resText);
+          alert(`فشل التعديل (كود ${res.status})`);
           return;
         }
-        const result = await safeJson(res, {});
-        if (result && result.success === false) {
+        let result = {};
+        try { result = resText ? JSON.parse(resText) : {}; } catch {}
+        if (result.success === false) {
           alert('فشل التعديل: ' + (result.message || 'خطأ غير معروف'));
           return;
         }
@@ -297,27 +302,28 @@ export default function AdminDashboard() {
           headers: getAdminHeaders(),
           body: JSON.stringify(productData)
         });
+        // Read body once
+        const resText = await res.text();
         if (!res.ok) {
-          const errText = await res.text();
-          console.error('POST failed:', res.status, errText);
-          alert(`فشل الإضافة (كود ${res.status}): تأكد من تشغيل الباكند محلياً`);
+          console.error('POST failed:', res.status, resText);
+          alert(`فشل الإضافة (كود ${res.status})`);
           return;
         }
-        const result = await safeJson(res, {});
-        if (result && result.success === false) {
+        let result = {};
+        try { result = resText ? JSON.parse(resText) : {}; } catch {}
+        if (result.success === false) {
           alert('فشل الإضافة: ' + (result.message || 'خطأ غير معروف'));
           return;
         }
       }
       
-      alert('✅ تم الحفظ بنجاح!');
       setIsProductModalOpen(false);
       setEditingProduct(null);
       clientCache.clearAll();
-      fetchData(true);
+      await fetchData(true);
     } catch (err) {
       console.error('saveProduct exception:', err);
-      alert('خطأ غير متوقع: ' + err.message + '\nتأكد من تشغيل الباكند على منفذ 5001');
+      alert('خطأ: ' + err.message);
     } finally {
       setIsSaving(false);
     }
