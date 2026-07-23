@@ -52,23 +52,25 @@ export default function AdminDashboard() {
     'admin-password': password || localStorage.getItem('bw_admin_password') || '909035'
   });
 
-  async function fetchData() {
+  async function fetchData(forceRefresh = false) {
     try {
       const headers = { 'admin-password': password || localStorage.getItem('bw_admin_password') || '909035' };
 
-      const cached = clientCache.get('admin_dashboard');
-      if (cached && cached.data) {
-        const { resP, resC, resS, resH, resO, resCoupons } = cached.data;
-        if (Array.isArray(resP)) setProducts(resP);
-        if (Array.isArray(resC)) setCategories(resC);
-        if (resS && typeof resS === 'object') {
-          setSettings(resS);
-          setAnnouncements((resS.announcements && resS.announcements.length > 0) ? resS.announcements : defaultAnnouncements);
+      if (!forceRefresh) {
+        const cached = clientCache.get('admin_dashboard');
+        if (cached && cached.data) {
+          const { resP, resC, resS, resH, resO, resCoupons } = cached.data;
+          if (Array.isArray(resP)) setProducts(resP);
+          if (Array.isArray(resC)) setCategories(resC);
+          if (resS && typeof resS === 'object') {
+            setSettings(resS);
+            setAnnouncements((resS.announcements && resS.announcements.length > 0) ? resS.announcements : defaultAnnouncements);
+          }
+          if (resH && typeof resH === 'object') setHero(resH);
+          if (resO && typeof resO === 'object') setOverlay(resO);
+          if (Array.isArray(resCoupons)) setCoupons(resCoupons);
+          if (cached.age < 60) return;
         }
-        if (resH && typeof resH === 'object') setHero(resH);
-        if (resO && typeof resO === 'object') setOverlay(resO);
-        if (Array.isArray(resCoupons)) setCoupons(resCoupons);
-        if (cached.age < 60) return;
       }
 
       const API_BASE = import.meta.env.VITE_BACKEND_URL || 'https://black-white-backend.onrender.com';
@@ -236,29 +238,65 @@ export default function AdminDashboard() {
     const sizes = formData.getAll('size_name');
     const prices = formData.getAll('size_price');
     sizes.forEach((s, i) => { if (s && prices[i]) productData.prices[s] = Number(prices[i]); });
+    
     const fileInput = e.target.querySelector('input[type="file"]');
     if (fileInput?.files?.length > 0) {
+      // New images uploaded — use them
       const filesToUpload = Array.from(fileInput.files).slice(0, 4);
       const urls = await handleImageUpload(filesToUpload);
       if (urls.length > 0) {
         productData.images = urls;
         productData.mainImage = urls[0];
       }
+    } else if (editingProduct) {
+      // No new images — preserve existing ones
+      productData.images = editingProduct.images || editingProduct.image || [];
+      productData.mainImage = editingProduct.mainImage || productData.images[0] || '';
     }
-    const method = editingProduct?._id ? 'PUT' : 'POST';
-    const url = editingProduct?._id ? `/api/products/${editingProduct.id}` : '/api/products';
-    productData.id = editingProduct ? editingProduct.id : Date.now().toString();
-    await fetch(url, { method, headers: getAdminHeaders(), body: JSON.stringify(productData) });
+
+    // Determine if editing or creating
+    const isEditing = !!editingProduct;
+    
+    if (isEditing) {
+      // Use custom 'id' field for URL, fall back to _id
+      const productId = editingProduct.id || editingProduct._id;
+      productData.id = editingProduct.id || Date.now().toString();
+      const updateUrl = `/api/products/${productId}`;
+      const res = await fetch(updateUrl, { method: 'PUT', headers: getAdminHeaders(), body: JSON.stringify(productData) });
+      const result = await res.json();
+      if (!result.success) {
+        console.error('Update failed:', result);
+        alert('فشل التعديل: ' + (result.message || 'خطأ غير معروف'));
+        return;
+      }
+    } else {
+      // New product
+      productData.id = Date.now().toString();
+      const res = await fetch('/api/products', { method: 'POST', headers: getAdminHeaders(), body: JSON.stringify(productData) });
+      const result = await res.json();
+      if (!result.success) {
+        console.error('Create failed:', result);
+        alert('فشل الإضافة: ' + (result.message || 'خطأ غير معروف'));
+        return;
+      }
+    }
+    
     setIsProductModalOpen(false);
+    setEditingProduct(null);
     clientCache.clearAll();
-    fetchData();
+    fetchData(true); // Force refresh from server
   };
 
   const deleteProduct = async (id) => {
     if(window.confirm('هل أنت متأكد من الحذف؟')) {
-      await fetch(`/api/products/${id}`, { method: 'DELETE', headers: getAdminHeaders() });
+      const res = await fetch(`/api/products/${id}`, { method: 'DELETE', headers: getAdminHeaders() });
+      const result = await res.json();
+      if (!result.success) {
+        alert('فشل الحذف: ' + (result.message || 'خطأ غير معروف'));
+        return;
+      }
       clientCache.clearAll();
-      fetchData();
+      fetchData(true); // Force refresh
     }
   };
 
@@ -266,20 +304,26 @@ export default function AdminDashboard() {
     e.preventDefault();
     const formData = new FormData(e.target);
     const catData = { name: { ar: formData.get('name_ar'), en: formData.get('name_en') } };
-    const method = editingCategory?._id ? 'PUT' : 'POST';
-    const url = editingCategory?._id ? `/api/categories/${editingCategory.id}` : '/api/categories';
-    catData.id = editingCategory ? editingCategory.id : Date.now().toString();
-    await fetch(url, { method, headers: getAdminHeaders(), body: JSON.stringify(catData) });
+    const isEditing = !!editingCategory;
+    if (isEditing) {
+      const catId = editingCategory.id || editingCategory._id;
+      catData.id = editingCategory.id || Date.now().toString();
+      await fetch(`/api/categories/${catId}`, { method: 'PUT', headers: getAdminHeaders(), body: JSON.stringify(catData) });
+    } else {
+      catData.id = Date.now().toString();
+      await fetch('/api/categories', { method: 'POST', headers: getAdminHeaders(), body: JSON.stringify(catData) });
+    }
     setIsCategoryModalOpen(false);
+    setEditingCategory(null);
     clientCache.clearAll();
-    fetchData();
+    fetchData(true);
   };
 
   const deleteCategory = async (id) => {
     if(window.confirm('هل أنت متأكد من الحذف؟')) {
       await fetch(`/api/categories/${id}`, { method: 'DELETE', headers: getAdminHeaders() });
       clientCache.clearAll();
-      fetchData();
+      fetchData(true);
     }
   };
 
@@ -292,20 +336,26 @@ export default function AdminDashboard() {
       value: Number(formData.get('value')),
       isActive: formData.get('isActive') === 'on'
     };
-    const method = editingCoupon?._id ? 'PUT' : 'POST';
-    const url = editingCoupon?._id ? `/api/coupons/${editingCoupon.id}` : '/api/coupons';
-    couponData.id = editingCoupon ? editingCoupon.id : Date.now().toString();
-    await fetch(url, { method, headers: getAdminHeaders(), body: JSON.stringify(couponData) });
+    const isEditing = !!editingCoupon;
+    if (isEditing) {
+      const couponId = editingCoupon.id || editingCoupon._id;
+      couponData.id = editingCoupon.id || Date.now().toString();
+      await fetch(`/api/coupons/${couponId}`, { method: 'PUT', headers: getAdminHeaders(), body: JSON.stringify(couponData) });
+    } else {
+      couponData.id = Date.now().toString();
+      await fetch('/api/coupons', { method: 'POST', headers: getAdminHeaders(), body: JSON.stringify(couponData) });
+    }
     setIsCouponModalOpen(false);
+    setEditingCoupon(null);
     clientCache.clearAll();
-    fetchData();
+    fetchData(true);
   };
 
   const deleteCoupon = async (id) => {
     if(window.confirm('هل أنت متأكد من الحذف؟')) {
       await fetch(`/api/coupons/${id}`, { method: 'DELETE', headers: getAdminHeaders() });
       clientCache.clearAll();
-      fetchData();
+      fetchData(true);
     }
   };
 
@@ -331,7 +381,7 @@ export default function AdminDashboard() {
     await fetch('/api/hero', { method: 'PUT', headers: getAdminHeaders(), body: JSON.stringify(heroData) });
     alert('تم الحفظ بنجاح');
     clientCache.clearAll();
-    fetchData();
+    fetchData(true);
   };
 
   const saveOverlay = async (e) => {
@@ -341,7 +391,7 @@ export default function AdminDashboard() {
     await fetch('/api/overlay', { method: 'PUT', headers: getAdminHeaders(), body: JSON.stringify(overlayData) });
     alert('تم الحفظ بنجاح');
     clientCache.clearAll();
-    fetchData();
+    fetchData(true);
   };
 
   const saveSettings = async (e) => {
@@ -357,7 +407,7 @@ export default function AdminDashboard() {
     await fetch('/api/settings', { method: 'PUT', headers: getAdminHeaders(), body: JSON.stringify(settingsData) });
     alert('تم الحفظ بنجاح');
     clientCache.clearAll();
-    fetchData();
+    fetchData(true);
   };
 
   return (
